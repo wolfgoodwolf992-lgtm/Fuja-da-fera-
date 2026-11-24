@@ -1,0 +1,652 @@
+<?xml version='1.0' encoding='utf-8'?>
+<roblox version="4"><Item class="ServerScriptService"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Script"><Properties><string name="Name">FujaDaFera_Server</string><bool name="Disabled">false</bool><ProtectedString name="Source">-- FUJA DA FERA | Servidor principal
+-- Este arquivo gera lobby, mapas, votação e partidas automaticamente.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+
+local remotes = Instance.new("Folder")
+remotes.Name = "FujaDaFeraRemotes"
+remotes.Parent = ReplicatedStorage
+
+local function makeRemote(name)
+    local r = Instance.new("RemoteEvent")
+    r.Name = name
+    r.Parent = remotes
+    return r
+end
+
+local UI = makeRemote("UI")
+local Attack = makeRemote("Attack")
+local Proximity = makeRemote("Proximity")
+
+local lobby = Instance.new("Folder")
+lobby.Name = "LobbyFujaDaFera"
+lobby.Parent = workspace
+local mapsFolder = Instance.new("Folder")
+mapsFolder.Name = "MapasFujaDaFera"
+mapsFolder.Parent = workspace
+
+local MIN_PLAYERS = 2
+local VOTE_SECONDS = 15
+local HUNTER_DELAY = 15
+local ROUND_SECONDS = 180
+local TAG_DISTANCE = 4.5
+local HITS_TO_TAG = 2
+
+local roundActive = false
+local voting = false
+local votes = {}
+local votePads = {}
+local hunter = nil
+local alive = {}
+local hitCounts = {}
+local currentMap = nil
+local mapSpawn = nil
+local hunterSpawn = nil
+local proximityState = false
+
+local MAPS = {
+    ["Escritório"] = {Color = Color3.fromRGB(76, 116, 153), Wall = Color3.fromRGB(75, 91, 112), Accent = Color3.fromRGB(245, 190, 85)},
+    ["Playground"] = {Color = Color3.fromRGB(75, 150, 105), Wall = Color3.fromRGB(55, 116, 82), Accent = Color3.fromRGB(255, 125, 90)},
+    ["Labirinto"] = {Color = Color3.fromRGB(132, 91, 163), Wall = Color3.fromRGB(91, 67, 120), Accent = Color3.fromRGB(190, 145, 255)}
+}
+
+local function newPart(parent, name, size, cf, color, material, transparency)
+    local p = Instance.new("Part")
+    p.Name = name
+    p.Size = size
+    p.CFrame = cf
+    p.Anchored = true
+    p.Color = color
+    p.Material = material or Enum.Material.SmoothPlastic
+    p.Transparency = transparency or 0
+    p.TopSurface = Enum.SurfaceType.Smooth
+    p.BottomSurface = Enum.SurfaceType.Smooth
+    p.Parent = parent
+    return p
+end
+
+local function billboard(adornee, text)
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "PlacaDeVotos"
+    gui.Adornee = adornee
+    gui.Size = UDim2.fromOffset(240, 64)
+    gui.StudsOffset = Vector3.new(0, 4, 0)
+    gui.AlwaysOnTop = true
+    gui.Parent = adornee
+    local label = Instance.new("TextLabel")
+    label.Name = "Texto"
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.TextStrokeTransparency = 0.1
+    label.Font = Enum.Font.GothamBold
+    label.TextScaled = true
+    label.Parent = gui
+end
+
+local function notifyAll(message)
+    UI:FireAllClients("Message", message)
+end
+
+local function setLobbyLighting()
+    Lighting.ClockTime = 14
+    Lighting.Brightness = 2
+    Lighting.FogStart = 0
+    Lighting.FogEnd = 100000
+    Lighting.FogColor = Color3.fromRGB(190, 205, 220)
+    Lighting.Ambient = Color3.fromRGB(125, 125, 125)
+    Lighting.OutdoorAmbient = Color3.fromRGB(130, 130, 130)
+end
+
+local function setRoundLighting()
+    Lighting.ClockTime = 0
+    Lighting.Brightness = 0.8
+    Lighting.FogColor = Color3.fromRGB(5, 5, 12)
+    Lighting.FogStart = 5
+    Lighting.FogEnd = 105
+    Lighting.Ambient = Color3.fromRGB(18, 18, 29)
+    Lighting.OutdoorAmbient = Color3.fromRGB(8, 8, 15)
+end
+
+local function updateVotes()
+    for _, pad in ipairs(votePads) do
+        local mapName = pad:GetAttribute("MapName")
+        local count = 0
+        for _, choice in pairs(votes) do
+            if choice == mapName then count += 1 end
+        end
+        local gui = pad:FindFirstChild("PlacaDeVotos")
+        local label = gui and gui:FindFirstChild("Texto")
+        if label then label.Text = mapName .. "\n" .. count .. " votos" end
+    end
+end
+
+local function createLobby()
+    newPart(lobby, "PisoLobby", Vector3.new(110, 2, 100), CFrame.new(0, -1, 0), Color3.fromRGB(42, 49, 63), Enum.Material.Slate)
+    newPart(lobby, "ParedeNorte", Vector3.new(110, 18, 2), CFrame.new(0, 8, -50), Color3.fromRGB(29, 36, 51))
+    newPart(lobby, "ParedeSul", Vector3.new(110, 18, 2), CFrame.new(0, 8, 50), Color3.fromRGB(29, 36, 51))
+    newPart(lobby, "ParedeLeste", Vector3.new(2, 18, 100), CFrame.new(55, 8, 0), Color3.fromRGB(29, 36, 51))
+    newPart(lobby, "ParedeOeste", Vector3.new(2, 18, 100), CFrame.new(-55, 8, 0), Color3.fromRGB(29, 36, 51))
+    local spawn = Instance.new("SpawnLocation")
+    spawn.Name = "SpawnLobby"
+    spawn.Size = Vector3.new(8, 1, 8)
+    spawn.CFrame = CFrame.new(0, 1, 0)
+    spawn.Anchored = true
+    spawn.Neutral = true
+    spawn.Parent = lobby
+    local title = newPart(lobby, "TituloLobby", Vector3.new(1, 1, 1), CFrame.new(0, 11, -35), Color3.new(1,1,1))
+    title.Transparency = 1
+    title.CanCollide = false
+    billboard(title, "FUJA DA FERA  •  PISE PARA VOTAR")
+
+    local choices = {
+        {Vector3.new(-28, 0.1, 22), "Escritório", Color3.fromRGB(70, 130, 190)},
+        {Vector3.new(0, 0.1, 22), "Playground", Color3.fromRGB(75, 180, 115)},
+        {Vector3.new(28, 0.1, 22), "Labirinto", Color3.fromRGB(155, 105, 195)}
+    }
+    for _, data in ipairs(choices) do
+        local pad = newPart(lobby, "PlataformaVoto_" .. data[2], Vector3.new(16, 1, 16), CFrame.new(data[1]), data[3], Enum.Material.Neon)
+        pad:SetAttribute("MapName", data[2])
+        billboard(pad, data[2] .. "\n0 votos")
+        table.insert(votePads, pad)
+        pad.Touched:Connect(function(hit)
+            if not voting then return end
+            local character = hit:FindFirstAncestorOfClass("Model")
+            local player = character and Players:GetPlayerFromCharacter(character)
+            if player then
+                votes[player.UserId] = data[2]
+                updateVotes()
+                UI:FireClient(player, "Message", "Voto registrado: " .. data[2])
+            end
+        end)
+    end
+end
+
+local function makeLamp(parent, position, color)
+    local bulb = newPart(parent, "LampadaDoTeto", Vector3.new(3, 0.35, 3), CFrame.new(position), color, Enum.Material.Neon)
+    bulb.CanCollide = false
+    local light = Instance.new("PointLight")
+    light.Name = "LuzPiscante"
+    light.Color = color
+    light.Brightness = 1.7
+    light.Range = 25
+    light.Shadows = true
+    light.Parent = bulb
+end
+
+local function createMap(mapName)
+    local theme = MAPS[mapName]
+    local folder = Instance.new("Folder")
+    folder.Name = mapName
+    folder.Parent = mapsFolder
+    local center = Vector3.new(0, 0, 240)
+
+    -- Área fechada: piso, quatro paredes externas e teto sólido.
+    newPart(folder, "Piso", Vector3.new(120, 2, 120), CFrame.new(center), theme.Color, Enum.Material.Slate)
+    newPart(folder, "TetoFechado", Vector3.new(120, 2, 120), CFrame.new(center + Vector3.new(0, 30, 0)), Color3.fromRGB(30, 31, 42), Enum.Material.Concrete)
+    local wallY = 15
+    newPart(folder, "ParedeNorte", Vector3.new(120, 30, 3), CFrame.new(0, wallY, 180), theme.Wall)
+    newPart(folder, "ParedeSul", Vector3.new(120, 30, 3), CFrame.new(0, wallY, 300), theme.Wall)
+    newPart(folder, "ParedeLeste", Vector3.new(3, 30, 120), CFrame.new(60, wallY, 240), theme.Wall)
+    newPart(folder, "ParedeOeste", Vector3.new(3, 30, 120), CFrame.new(-60, wallY, 240), theme.Wall)
+
+    -- Corredores alternados formam um labirinto com passagens.
+    for row = 1, 5 do
+        local z = 190 + row * 17
+        for col = 1, 5 do
+            local x = -42 + col * 17
+            if (row + col) % 3 ~= 0 then
+                newPart(folder, "ParedeInterna", Vector3.new(3, 12, 14), CFrame.new(x, 7, z), theme.Wall)
+            end
+            if (row * col) % 4 ~= 0 then
+                newPart(folder, "ParedeInterna", Vector3.new(14, 12, 3), CFrame.new(x - 8, 7, z - 8), theme.Wall)
+            end
+        end
+    end
+
+    -- Decoração temática, sem bloquear os pontos iniciais.
+    for i = 1, 8 do
+        local x = -42 + (i % 4) * 27
+        local z = 198 + math.floor((i - 1) / 4) * 50
+        makeLamp(folder, Vector3.new(x, 28.5, z), Color3.fromRGB(255, 225, 160))
+        if mapName == "Escritório" then
+            newPart(folder, "MesaEscritorio", Vector3.new(8, 1, 4), CFrame.new(x + 6, 2, z + 6), Color3.fromRGB(105, 70, 45), Enum.Material.Wood)
+            newPart(folder, "Monitor", Vector3.new(2.5, 2, 0.4), CFrame.new(x + 6, 3.5, z + 4.3), Color3.fromRGB(30, 40, 55), Enum.Material.Metal)
+        elseif mapName == "Playground" then
+            newPart(folder, "TorreColorida", Vector3.new(3, 7, 3), CFrame.new(x + 6, 4, z + 6), theme.Accent, Enum.Material.Neon)
+            newPart(folder, "PlataformaBrinquedo", Vector3.new(7, 1, 7), CFrame.new(x + 6, 1.5, z + 6), Color3.fromRGB(70, 180, 210), Enum.Material.Neon)
+        else
+            newPart(folder, "Cristal", Vector3.new(3, 6, 3), CFrame.new(x + 6, 3.5, z + 6), theme.Accent, Enum.Material.Neon)
+        end
+    end
+    return folder, CFrame.new(-45, 5, 195), CFrame.new(45, 5, 285)
+end
+
+local function teleportPlayer(player, cf)
+    if player.Character then
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
+        if root then player.Character:PivotTo(cf) end
+    end
+end
+
+local function aliveCount()
+    local n = 0
+    for player, isAlive in pairs(alive) do
+        if isAlive and player.Parent == Players then n += 1 end
+    end
+    return n
+end
+
+local function giveHunterTool(player)
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    if not backpack then return end
+    local old = backpack:FindFirstChild("FacaDaFera")
+    if old then old:Destroy() end
+    local tool = Instance.new("Tool")
+    tool.Name = "FacaDaFera"
+    tool.RequiresHandle = true
+    tool.CanBeDropped = false
+    tool.ToolTip = "Clique duas vezes bem perto de um sobrevivente"
+    local handle = Instance.new("Part")
+    handle.Name = "Handle"
+    handle.Size = Vector3.new(0.35, 1.8, 0.35)
+    handle.Color = Color3.fromRGB(70, 45, 35)
+    handle.Material = Enum.Material.Wood
+    handle.Parent = tool
+    local guard = Instance.new("Part")
+    guard.Name = "Guarda"
+    guard.Size = Vector3.new(0.9, 0.15, 0.2)
+    guard.Color = Color3.fromRGB(210, 170, 75)
+    guard.Material = Enum.Material.Metal
+    guard.CanCollide = false
+    guard.Massless = true
+    guard.CFrame = handle.CFrame * CFrame.new(0, 0.5, 0)
+    guard.Parent = tool
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = handle
+    weld.Part1 = guard
+    weld.Parent = guard
+    local blade = Instance.new("Part")
+    blade.Name = "LaminaDecorativa"
+    blade.Size = Vector3.new(0.18, 1.5, 0.38)
+    blade.Color = Color3.fromRGB(190, 205, 220)
+    blade.Material = Enum.Material.Metal
+    blade.CanCollide = false
+    blade.Massless = true
+    blade.CFrame = handle.CFrame * CFrame.new(0, 1.55, 0)
+    blade.Parent = tool
+    local bladeWeld = Instance.new("WeldConstraint")
+    bladeWeld.Part0 = handle
+    bladeWeld.Part1 = blade
+    bladeWeld.Parent = blade
+    tool.Parent = backpack
+end
+
+Attack.OnServerEvent:Connect(function(player)
+    if not roundActive or player ~= hunter then return end
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local equipped = char and char:FindFirstChild("FacaDaFera")
+    if not root or not equipped then return end
+
+    local nearest, nearestDistance
+    for target, isAlive in pairs(alive) do
+        if isAlive and target.Parent == Players and target.Character then
+            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            local hum = target.Character:FindFirstChildOfClass("Humanoid")
+            if targetRoot and hum and hum.Health &gt; 0 then
+                local distance = (targetRoot.Position - root.Position).Magnitude
+                if distance &lt;= TAG_DISTANCE and (not nearestDistance or distance &lt; nearestDistance) then
+                    nearest, nearestDistance = target, distance
+                end
+            end
+        end
+    end
+    if not nearest then
+        UI:FireClient(player, "Message", "Chegue bem perto do sobrevivente!")
+        return
+    end
+
+    hitCounts[nearest] = (hitCounts[nearest] or 0) + 1
+    if hitCounts[nearest] &gt;= HITS_TO_TAG then
+        alive[nearest] = false
+        hitCounts[nearest] = nil
+        local hum = nearest.Character and nearest.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = 0 end
+        UI:FireAllClients("Message", nearest.DisplayName .. " foi pego pela Fera!")
+        UI:FireClient(nearest, "Eliminated")
+    else
+        UI:FireClient(player, "Message", "Acerto 1/2! Clique mais uma vez encostado.")
+    end
+end)
+
+local function chooseMap()
+    votes = {}
+    updateVotes()
+    voting = true
+    UI:FireAllClients("Message", "Pise em uma plataforma para votar!")
+    for seconds = VOTE_SECONDS, 1, -1 do
+        UI:FireAllClients("Countdown", "Votação: " .. seconds)
+        task.wait(1)
+    end
+    voting = false
+    local totals = {}
+    for mapName in pairs(MAPS) do totals[mapName] = 0 end
+    for _, mapName in pairs(votes) do totals[mapName] = (totals[mapName] or 0) + 1 end
+    local highest = -1
+    local winners = {}
+    for mapName, count in pairs(totals) do
+        if count &gt; highest then
+            highest = count
+            winners = {mapName}
+        elseif count == highest then
+            table.insert(winners, mapName)
+        end
+    end
+    updateVotes()
+    return winners[math.random(1, #winners)]
+end
+
+local function waitForMinimumPlayers()
+    while #Players:GetPlayers() &lt; MIN_PLAYERS do
+        UI:FireAllClients("NeedPlayers", "São necessários pelo menos 2 jogadores para começar! (" .. #Players:GetPlayers() .. "/2)")
+        task.wait(2)
+    end
+    notifyAll("Jogadores suficientes! A votação vai começar.")
+    task.wait(2)
+end
+
+local function runRound()
+    waitForMinimumPlayers()
+    local mapName = chooseMap()
+    if currentMap then currentMap:Destroy() end
+    currentMap, mapSpawn, hunterSpawn = createMap(mapName)
+    setRoundLighting()
+
+    local roster = Players:GetPlayers()
+    if #roster &lt; 2 then
+        currentMap:Destroy()
+        currentMap = nil
+        setLobbyLighting()
+        return
+    end
+    hunter = roster[math.random(1, #roster)]
+    alive = {}
+    hitCounts = {}
+    proximityState = false
+
+    for _, player in ipairs(roster) do
+        if player.Character then
+            if player == hunter then
+                teleportPlayer(player, hunterSpawn)
+            else
+                alive[player] = true
+                teleportPlayer(player, mapSpawn + Vector3.new(math.random(-4,4), 0, math.random(-4,4)))
+            end
+        end
+    end
+
+    local names = {}
+    for _, player in ipairs(roster) do table.insert(names, player.DisplayName) end
+    UI:FireAllClients("Roulette", {Names = names, Winner = hunter.DisplayName, Map = mapName})
+    UI:FireClient(hunter, "Role", "VOCÊ É A FERA")
+    for player in pairs(alive) do UI:FireClient(player, "Role", "SOBREVIVA E FUJA!") end
+
+    for seconds = HUNTER_DELAY, 1, -1 do
+        UI:FireAllClients("Countdown", "A Fera será liberada em " .. seconds .. "s")
+        task.wait(1)
+    end
+    if hunter and hunter.Parent == Players then giveHunterTool(hunter) end
+    notifyAll("A Fera foi liberada! Fujam!")
+    roundActive = true
+
+    local elapsed = 0
+    while roundActive and elapsed &lt; ROUND_SECONDS and aliveCount() &gt; 0 and hunter and hunter.Parent == Players do
+        local hRoot = hunter.Character and hunter.Character:FindFirstChild("HumanoidRootPart")
+        local close = false
+        if hRoot then
+            for target, isAlive in pairs(alive) do
+                local tRoot = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+                if isAlive and tRoot and (tRoot.Position - hRoot.Position).Magnitude &lt;= 35 then
+                    close = true
+                    break
+                end
+            end
+        end
+        if close ~= proximityState then
+            proximityState = close
+            Proximity:FireAllClients(close)
+        end
+        UI:FireAllClients("Timer", "Tempo restante: " .. (ROUND_SECONDS - elapsed) .. "s")
+        task.wait(1)
+        elapsed += 1
+    end
+
+    roundActive = false
+    Proximity:FireAllClients(false)
+    if aliveCount() == 0 then notifyAll("A FERA VENCEU!")
+    else notifyAll("OS SOBREVIVENTES VENCERAM!") end
+    task.wait(5)
+
+    if currentMap then currentMap:Destroy() currentMap = nil end
+    setLobbyLighting()
+    for _, player in ipairs(Players:GetPlayers()) do
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        if backpack and backpack:FindFirstChild("FacaDaFera") then backpack.FacaDaFera:Destroy() end
+        if player.Character then
+            local tool = player.Character:FindFirstChild("FacaDaFera")
+            if tool then tool:Destroy() end
+            local hum = player.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.Health = hum.MaxHealth end
+            teleportPlayer(player, CFrame.new(0, 4, 0))
+        end
+    end
+    hunter = nil
+    alive = {}
+    hitCounts = {}
+end
+
+createLobby()
+setLobbyLighting()
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        task.wait(0.8)
+        if not roundActive then teleportPlayer(player, CFrame.new(0, 4, 0)) end
+    end)
+end)
+
+task.spawn(function()
+    while true do
+        local ok, err = pcall(runRound)
+        if not ok then
+            warn("[Fuja da Fera] Erro na rodada: " .. tostring(err))
+            roundActive = false
+            voting = false
+            Proximity:FireAllClients(false)
+            setLobbyLighting()
+            task.wait(5)
+        end
+        task.wait(3)
+    end
+end)
+</ProtectedString></Properties></Item></Item><Item class="StarterPlayer"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts"><Properties /><Item class="LocalScript"><Properties><string name="Name">FujaDaFera_Client</string><bool name="Disabled">false</bool><ProtectedString name="Source">-- FUJA DA FERA | Interface e efeitos do jogador
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local player = Players.LocalPlayer
+local remotes = ReplicatedStorage:WaitForChild("FujaDaFeraRemotes")
+local UI = remotes:WaitForChild("UI")
+local Attack = remotes:WaitForChild("Attack")
+local Proximity = remotes:WaitForChild("Proximity")
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "FujaDaFeraInterface"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local function makeText(name, size, position, text, textSize)
+    local label = Instance.new("TextLabel")
+    label.Name = name
+    label.Size = size
+    label.Position = position
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.new(1,1,1)
+    label.TextStrokeColor3 = Color3.new(0,0,0)
+    label.TextStrokeTransparency = 0.12
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = textSize
+    label.TextScaled = true
+    label.Parent = gui
+    return label
+end
+
+local status = makeText("Mensagem", UDim2.fromOffset(420, 38), UDim2.new(1, -435, 0, 12), "Aguardando jogadores...", 20)
+status.TextXAlignment = Enum.TextXAlignment.Right
+local role = makeText("Funcao", UDim2.fromOffset(420, 32), UDim2.new(1, -435, 0, 50), "", 18)
+role.TextXAlignment = Enum.TextXAlignment.Right
+
+local roulette = Instance.new("Frame")
+roulette.Name = "RoletaHorizontal"
+roulette.Size = UDim2.new(0.8, 0, 0, 66)
+roulette.Position = UDim2.new(0.1, 0, 0.38, 0)
+roulette.BackgroundTransparency = 1
+roulette.ClipsDescendants = true
+roulette.Visible = false
+roulette.Parent = gui
+
+local strip = Instance.new("Frame")
+strip.BackgroundTransparency = 1
+strip.Size = UDim2.fromOffset(10000, 66)
+strip.Parent = roulette
+local layout = Instance.new("UIListLayout")
+layout.FillDirection = Enum.FillDirection.Horizontal
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 12)
+layout.Parent = strip
+
+local selected = makeText("NomeEscolhido", UDim2.new(0.8,0,0,66), UDim2.new(0.1,0,0.49,0), "", 30)
+selected.Visible = false
+
+local flickerActive = false
+local function flickerLoop(enabled)
+    flickerActive = enabled
+    if not enabled then
+        local folder = workspace:FindFirstChild("MapasFujaDaFera")
+        if folder then
+            for _, obj in ipairs(folder:GetDescendants()) do
+                if obj:IsA("PointLight") and obj.Name == "LuzPiscante" then
+                    obj.Enabled = true
+                    obj.Brightness = 1.7
+                end
+            end
+        end
+        return
+    end
+    task.spawn(function()
+        while flickerActive do
+            local folder = workspace:FindFirstChild("MapasFujaDaFera")
+            if folder then
+                for _, obj in ipairs(folder:GetDescendants()) do
+                    if obj:IsA("PointLight") and obj.Name == "LuzPiscante" then
+                        obj.Enabled = math.random() &gt; 0.3
+                        obj.Brightness = math.random(4, 20) / 10
+                    end
+                end
+            end
+            task.wait(math.random(8, 20) / 100)
+        end
+    end)
+end
+
+local function showRoulette(data)
+    roulette.Visible = true
+    selected.Visible = false
+    for _, child in ipairs(strip:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+    local names = data.Names or {}
+    local sequence = {}
+    for i = 1, 7 do
+        for _, name in ipairs(names) do table.insert(sequence, name) end
+    end
+    table.insert(sequence, data.Winner)
+    for index, name in ipairs(sequence) do
+        local item = Instance.new("TextLabel")
+        item.BackgroundTransparency = 1
+        item.Size = UDim2.fromOffset(190, 60)
+        item.Text = "&gt; " .. name .. " &lt;"
+        item.TextColor3 = Color3.fromRGB(245,245,255)
+        item.TextStrokeTransparency = 0.1
+        item.Font = Enum.Font.GothamBold
+        item.TextScaled = true
+        item.LayoutOrder = index
+        item.Parent = strip
+    end
+    strip.Position = UDim2.new(0, 0, 0, 0)
+    task.wait()
+    local step = 202
+    local target = -((#sequence - 1) * step) + roulette.AbsoluteSize.X / 2 - 95
+    local tween = TweenService:Create(strip, TweenInfo.new(5.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.new(0, target, 0, 0)})
+    tween:Play()
+    tween.Completed:Wait()
+    roulette.Visible = false
+    selected.Text = "&gt; " .. data.Winner .. " &lt;"
+    selected.Visible = true
+    selected.TextColor3 = Color3.fromRGB(255,255,255)
+    task.wait(0.18)
+    selected.TextColor3 = Color3.fromRGB(255,85,85)
+    task.wait(0.18)
+    selected.TextColor3 = Color3.fromRGB(255,255,255)
+    task.wait(2)
+    selected.Visible = false
+end
+
+UI.OnClientEvent:Connect(function(action, data)
+    if action == "NeedPlayers" then
+        status.Text = tostring(data)
+        role.Text = "A partida começa com 2 ou mais jogadores."
+    elseif action == "Message" then
+        status.Text = tostring(data)
+    elseif action == "Countdown" or action == "Timer" then
+        status.Text = tostring(data)
+    elseif action == "Role" then
+        role.Text = tostring(data)
+    elseif action == "Eliminated" then
+        role.Text = "Você foi capturado. Aguarde a próxima rodada."
+    elseif action == "Roulette" then
+        status.Text = "Mapa: " .. tostring(data.Map)
+        task.spawn(showRoulette, data)
+    end
+end)
+
+Proximity.OnClientEvent:Connect(function(close)
+    flickerLoop(close == true)
+end)
+
+-- Um único evento de ativação evita contar um clique duas vezes.
+local lastClick = 0
+local function tryAttack()
+    if os.clock() - lastClick &lt; 0.3 then return end
+    lastClick = os.clock()
+    Attack:FireServer()
+end
+
+-- Tool.Activated funciona com mouse e toque quando a ferramenta está equipada.
+local function bindTool(tool)
+    if tool.Name == "FacaDaFera" and tool:IsA("Tool") then
+        tool.Activated:Connect(tryAttack)
+    end
+end
+local function watchCharacter(character)
+    for _, child in ipairs(character:GetChildren()) do bindTool(child) end
+    character.ChildAdded:Connect(bindTool)
+end
+if player.Character then watchCharacter(player.Character) end
+player.CharacterAdded:Connect(watchCharacter)
+</ProtectedString></Properties></Item></Item></Item><Item class="Lighting"><Properties><string name="Name">Lighting</string></Properties></Item></roblox>
