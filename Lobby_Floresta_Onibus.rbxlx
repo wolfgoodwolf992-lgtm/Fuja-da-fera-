@@ -1,0 +1,441 @@
+<?xml version="1.0" encoding="utf-8"?>
+<roblox version="4">
+  <External>null</External>
+  <External>nil</External>
+  <Item class="ServerScriptService" referent="RBX0">
+    <Properties>
+      <bool name="Archivable">true</bool>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="RBX1">
+      <Properties>
+        <bool name="Archivable">true</bool>
+        <bool name="Disabled">false</bool>
+        <string name="Name">LobbyFlorestaSistema</string>
+        <ProtectedString name="Source"><![CDATA[-- LOBBY FLORESTA - SISTEMA COMPLETO
+-- Place de destino: 90866173979987
+-- Lobby: 10779248868
+-- Este Script cria o cenário, ônibus, barreiras, iluminação e sistema de embarque.
+-- Coloque/abra este arquivo no Roblox Studio e publique o lobby na experiência correta.
+
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
+
+local DESTINATION_PLACE_ID = 90866173979987
+local BUS_COUNT = 4
+local BUS_CAPACITY = 10
+local WAIT_TIME = 30
+local BUS_SPEED = 34
+local TRAVEL_DISTANCE = 330
+
+local old = workspace:FindFirstChild("LobbyFlorestaGerado")
+if old then old:Destroy() end
+
+local root = Instance.new("Folder")
+root.Name = "LobbyFlorestaGerado"
+root.Parent = workspace
+
+local function part(parent, name, size, cf, color, material, transparency, collide)
+    local p = Instance.new("Part")
+    p.Name = name
+    p.Size = size
+    p.CFrame = cf
+    p.Anchored = true
+    p.Color = color or Color3.fromRGB(80, 80, 80)
+    p.Material = material or Enum.Material.Concrete
+    p.Transparency = transparency or 0
+    p.CanCollide = collide ~= false
+    p.TopSurface = Enum.SurfaceType.Smooth
+    p.BottomSurface = Enum.SurfaceType.Smooth
+    p.Parent = parent
+    return p
+end
+
+local function model(parent, name)
+    local m = Instance.new("Model")
+    m.Name = name
+    m.Parent = parent
+    return m
+end
+
+local function pointLight(parent, color, brightness, range)
+    local l = Instance.new("PointLight")
+    l.Color = color
+    l.Brightness = brightness
+    l.Range = range
+    l.Shadows = true
+    l.Parent = parent
+    return l
+end
+
+local function makeLabel(parent, text, size, offset)
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "Display"
+    gui.Size = UDim2.fromOffset(220, 64)
+    gui.StudsOffset = offset or Vector3.new(0, 5, 0)
+    gui.AlwaysOnTop = true
+    gui.MaxDistance = 180
+    gui.Parent = parent
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundColor3 = Color3.fromRGB(12, 18, 16)
+    label.BackgroundTransparency = 0.18
+    label.TextColor3 = Color3.fromRGB(245, 245, 230)
+    label.TextStrokeTransparency = 0.55
+    label.Font = Enum.Font.GothamBold
+    label.TextScaled = true
+    label.Text = text
+    label.Parent = gui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = label
+    return label
+end
+
+-- Atmosfera e iluminação noturna cinematográfica
+Lighting.ClockTime = 19.2
+Lighting.Brightness = 2
+Lighting.Ambient = Color3.fromRGB(65, 75, 80)
+Lighting.OutdoorAmbient = Color3.fromRGB(45, 55, 60)
+Lighting.EnvironmentDiffuseScale = 0.35
+Lighting.EnvironmentSpecularScale = 0.55
+Lighting.FogColor = Color3.fromRGB(39, 53, 52)
+Lighting.FogStart = 180
+Lighting.FogEnd = 650
+local atmosphere = Instance.new("Atmosphere")
+atmosphere.Density = 0.32
+atmosphere.Offset = 0.1
+atmosphere.Color = Color3.fromRGB(170, 190, 185)
+atmosphere.Decay = Color3.fromRGB(55, 75, 70)
+atmosphere.Glare = 0.12
+atmosphere.Haze = 1.6
+atmosphere.Parent = Lighting
+
+-- Base e áreas
+part(root, "TerrenoPrincipal", Vector3.new(360, 2, 420), CFrame.new(0, -1, 70), Color3.fromRGB(42, 55, 43), Enum.Material.Grass)
+part(root, "PisoTerminal", Vector3.new(112, 1, 105), CFrame.new(0, 0, -48), Color3.fromRGB(65, 68, 65), Enum.Material.Asphalt)
+part(root, "EstradaQuatroFaixas", Vector3.new(112, 1, 300), CFrame.new(0, 0, 150), Color3.fromRGB(35, 37, 38), Enum.Material.Asphalt)
+for x = -42, 42, 28 do
+    part(root, "FaixaDaEstrada", Vector3.new(0.45, 0.04, 300), CFrame.new(x, 0.54, 150), Color3.fromRGB(210, 205, 175), Enum.Material.Neon, 0.18, false)
+end
+for z = -90, 285, 25 do
+    part(root, "MeioFio", Vector3.new(116, 1.4, 1.2), CFrame.new(0, 0.3, z), Color3.fromRGB(105, 108, 103), Enum.Material.Concrete)
+end
+
+-- Limites invisíveis: a rua e a floresta ficam fora do alcance dos jogadores.
+local function barrier(name, size, cf)
+    return part(root, name, size, cf, Color3.fromRGB(255, 0, 0), Enum.Material.ForceField, 1, true)
+end
+barrier("ParedeInvisivelEsquerda", Vector3.new(2, 35, 390), CFrame.new(-57, 16, 80))
+barrier("ParedeInvisivelDireita", Vector3.new(2, 35, 390), CFrame.new(57, 16, 80))
+barrier("ParedeInvisivelFundos", Vector3.new(116, 35, 2), CFrame.new(0, 16, -100))
+barrier("ParedeInvisivelLateralRuaEsquerda", Vector3.new(2, 35, 300), CFrame.new(-56, 16, 150))
+barrier("ParedeInvisivelLateralRuaDireita", Vector3.new(2, 35, 300), CFrame.new(56, 16, 150))
+
+-- Floresta somente além das paredes de contenção
+local rng = Random.new(48192)
+local function tree(x, z, scale)
+    local t = model(root, "ArvoreFloresta")
+    local trunkHeight = 13 * scale
+    local trunk = part(t, "Tronco", Vector3.new(2.2, trunkHeight, 2.2),
+        CFrame.new(x, trunkHeight/2 - 0.2, z), Color3.fromRGB(76, 55, 37), Enum.Material.Wood)
+    for i = 1, 3 do
+        local h = 10 * scale
+        local foliage = part(t, "Copa", Vector3.new(h, h, h),
+            CFrame.new(x, trunkHeight + (i-1)*4*scale, z),
+            i == 2 and Color3.fromRGB(25, 65, 43) or Color3.fromRGB(19, 52, 36),
+            Enum.Material.Grass)
+        foliage.Shape = Enum.PartType.Ball
+    end
+end
+for side = -1, 1, 2 do
+    for z = -115, 300, 17 do
+        for lane = 1, 4 do
+            local x = side * (76 + rng:NextNumber(0, 48))
+            tree(x, z + rng:NextNumber(-6, 6), rng:NextNumber(0.8, 1.35))
+        end
+    end
+end
+
+-- Túnel grande, alinhado com as quatro faixas
+local tunnel = model(root, "TunelDeChegada")
+part(tunnel, "ParedeEsquerda", Vector3.new(5, 28, 65), CFrame.new(-59, 14, 285), Color3.fromRGB(54, 58, 57), Enum.Material.Concrete)
+part(tunnel, "ParedeDireita", Vector3.new(5, 28, 65), CFrame.new(59, 14, 285), Color3.fromRGB(54, 58, 57), Enum.Material.Concrete)
+part(tunnel, "Teto", Vector3.new(123, 5, 65), CFrame.new(0, 29, 285), Color3.fromRGB(43, 47, 47), Enum.Material.Concrete)
+part(tunnel, "FundoEscuro", Vector3.new(118, 26, 2), CFrame.new(0, 13, 318), Color3.fromRGB(12, 15, 16), Enum.Material.Slate)
+for x = -42, 42, 28 do
+    local lamp = part(tunnel, "LuzDoTunel", Vector3.new(3, 0.5, 2), CFrame.new(x, 26, 257), Color3.fromRGB(255, 226, 170), Enum.Material.Neon, 0, false)
+    pointLight(lamp, Color3.fromRGB(255, 218, 155), 2.2, 32)
+end
+
+-- Postes de luz na área do terminal e ao longo da estrada
+local function lampPost(x, z)
+    local m = model(root, "PosteDeIluminacao")
+    part(m, "Base", Vector3.new(2.2, 0.8, 2.2), CFrame.new(x, 0.8, z), Color3.fromRGB(40, 43, 43), Enum.Material.Metal)
+    part(m, "Coluna", Vector3.new(0.65, 15, 0.65), CFrame.new(x, 8.2, z), Color3.fromRGB(35, 39, 39), Enum.Material.Metal)
+    part(m, "Braco", Vector3.new(5, 0.45, 0.45), CFrame.new(x + (x < 0 and 2 or -2), 15.4, z), Color3.fromRGB(35, 39, 39), Enum.Material.Metal)
+    local head = part(m, "Luminaria", Vector3.new(2.8, 0.6, 1.3), CFrame.new(x + (x < 0 and 4.2 or -4.2), 15.1, z), Color3.fromRGB(255, 226, 173), Enum.Material.Neon, 0, false)
+    pointLight(head, Color3.fromRGB(255, 220, 165), 2.5, 38)
+end
+for _, z in ipairs({-82, -42, 5, 55, 105, 155, 205, 250}) do
+    lampPost(-49, z)
+    lampPost(49, z)
+end
+
+-- Ponto de spawn
+local spawn = Instance.new("SpawnLocation")
+spawn.Name = "SpawnLobby"
+spawn.Size = Vector3.new(8, 1, 8)
+spawn.CFrame = CFrame.new(0, 1.2, -78)
+spawn.Anchored = true
+spawn.Neutral = true
+spawn.Duration = 0
+spawn.Color = Color3.fromRGB(80, 115, 90)
+spawn.Material = Enum.Material.Slate
+spawn.Parent = root
+
+-- Ônibus físicos, com assentos e zona de embarque individual.
+local buses = {}
+local busX = {-39, -13, 13, 39}
+local busZ = -34
+local busStart = {}
+local busLabels = {}
+
+local function makeBus(index, x)
+    local bus = model(root, "Onibus_" .. index)
+    local baseCF = CFrame.new(x, 2.1, busZ)
+    local function b(name, size, ox, oy, oz, color, mat, trans)
+        return part(bus, name, size, baseCF * CFrame.new(ox, oy, oz), color, mat, trans, true)
+    end
+    b("Chassi", Vector3.new(19, 1.4, 43), 0, 0, 0, Color3.fromRGB(24, 27, 29), Enum.Material.Metal)
+    b("CarroceriaInferior", Vector3.new(18.5, 4.4, 41), 0, 2.8, 0, Color3.fromRGB(27, 75, 68), Enum.Material.Metal)
+    b("Teto", Vector3.new(18.5, 0.8, 41), 0, 10.2, 0, Color3.fromRGB(20, 52, 48), Enum.Material.Metal)
+    b("Frente", Vector3.new(18.5, 8.5, 1), 0, 6.1, 20.5, Color3.fromRGB(24, 68, 62), Enum.Material.Metal)
+    b("Traseira", Vector3.new(18.5, 8.5, 1), 0, 6.1, -20.5, Color3.fromRGB(24, 68, 62), Enum.Material.Metal)
+    for side = -1, 1, 2 do
+        if side == -1 then
+            -- Abertura lateral real para os jogadores entrarem no ônibus.
+            b("LateralDianteira", Vector3.new(0.8, 7.7, 33), side*9.1, 6.2, 3, Color3.fromRGB(24, 68, 62), Enum.Material.Metal)
+        else
+            b("Lateral", Vector3.new(0.8, 7.7, 39), side*9.1, 6.2, 0, Color3.fromRGB(24, 68, 62), Enum.Material.Metal)
+        end
+        for z = -15, 13, 7 do
+            local win = b("JanelaEscura", Vector3.new(0.18, 3.4, 5.4), side*9.53, 7.4, z, Color3.fromRGB(24, 39, 45), Enum.Material.Glass, 0.22)
+            win.CanCollide = false
+        end
+        for z = -14, 14, 28 do
+            local wheel = b("Roda", Vector3.new(1.2, 4.4, 5.2), side*9.7, 2.3, z, Color3.fromRGB(15, 16, 17), Enum.Material.Rubber)
+            wheel.Shape = Enum.PartType.Cylinder
+            wheel.CFrame = wheel.CFrame * CFrame.Angles(0, 0, math.rad(90))
+        end
+    end
+    for side = -1, 1, 2 do
+        local light = b("Farol", Vector3.new(2.3, 0.7, 0.25), side*5.8, 4.2, 21.1, Color3.fromRGB(255, 239, 190), Enum.Material.Neon, 0)
+        light.CanCollide = false
+        pointLight(light, Color3.fromRGB(255, 232, 180), 1.8, 30)
+        local rear = b("Lanterna", Vector3.new(2, 0.8, 0.25), side*5.8, 4.2, -21.1, Color3.fromRGB(220, 35, 25), Enum.Material.Neon, 0)
+        rear.CanCollide = false
+    end
+
+    -- Corredor e dez assentos (duas colunas por cinco fileiras)
+    for row = 1, 5 do
+        for side = -1, 1, 2 do
+            local seat = Instance.new("Seat")
+            seat.Name = "Assento_" .. row .. "_" .. side
+            seat.Size = Vector3.new(3.3, 1, 3.3)
+            seat.CFrame = baseCF * CFrame.new(side*4.3, 4.4, 13 - (row-1)*6.2)
+            seat.Anchored = true
+            seat.Color = Color3.fromRGB(45, 49, 48)
+            seat.Material = Enum.Material.Fabric
+            seat.Parent = bus
+        end
+    end
+
+    local door = b("ZonaDeEmbarque", Vector3.new(5, 5, 4), -6.5, 4.7, -17, Color3.fromRGB(0, 255, 0), Enum.Material.ForceField, 1)
+    door.CanCollide = false
+    door.CanTouch = true
+    door:SetAttribute("BusIndex", index)
+
+    local signPart = b("Placa", Vector3.new(5, 2, 0.5), 0, 13, 20.9, Color3.fromRGB(12, 20, 19), Enum.Material.Metal)
+    signPart.CanCollide = false
+    local label = makeLabel(signPart, "ÔNIBUS " .. index .. "\n0/10 | 30s", Vector3.new(0,0,0), Vector3.new(0,2.5,0))
+    buses[index] = {model = bus, door = door, seats = {}, players = {}, timer = 0, departing = false, start = baseCF}
+    for _, obj in ipairs(bus:GetChildren()) do
+        if obj:IsA("Seat") then table.insert(buses[index].seats, obj) end
+    end
+    busStart[index] = bus:GetPivot()
+    busLabels[index] = label
+end
+
+for i = 1, BUS_COUNT do
+    makeBus(i, busX[i])
+end
+
+local function updateLabel(i)
+    local data = buses[i]
+    local count = #data.players
+    local remaining = math.max(0, math.ceil(data.timer))
+    if data.departing then
+        busLabels[i].Text = "ÔNIBUS " .. i .. "\nPARTINDO!"
+    elseif count == 0 then
+        busLabels[i].Text = "ÔNIBUS " .. i .. "\n0/10 | AGUARDANDO"
+    else
+        busLabels[i].Text = "ÔNIBUS " .. i .. "\n" .. count .. "/10 | " .. remaining .. "s"
+    end
+end
+
+local function removePlayerFromBus(player)
+    for i = 1, BUS_COUNT do
+        local data = buses[i]
+        for n = #data.players, 1, -1 do
+            if data.players[n] == player then
+                table.remove(data.players, n)
+                updateLabel(i)
+            end
+        end
+    end
+end
+
+local function boardPlayer(i, player)
+    local data = buses[i]
+    if data.departing or #data.players >= BUS_CAPACITY then return end
+    if table.find(data.players, player) then return end
+    local character = player.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart or humanoid.Health <= 0 then return end
+
+    local seat
+    for _, candidate in ipairs(data.seats) do
+        if candidate.Occupant == nil then seat = candidate break end
+    end
+    if not seat then return end
+
+    table.insert(data.players, player)
+    rootPart.CFrame = seat.CFrame * CFrame.new(0, 2.5, 0)
+    task.wait(0.15)
+    if humanoid.Parent then seat:Sit(humanoid) end
+    if #data.players == 1 then data.timer = WAIT_TIME end
+    updateLabel(i)
+end
+
+for i = 1, BUS_COUNT do
+    local index = i
+    buses[index].door.Touched:Connect(function(hit)
+        local character = hit:FindFirstAncestorOfClass("Model")
+        local player = character and Players:GetPlayerFromCharacter(character)
+        if player then boardPlayer(index, player) end
+    end)
+end
+
+local function departBus(i)
+    local data = buses[i]
+    if data.departing or #data.players == 0 then return end
+    data.departing = true
+    updateLabel(i)
+
+    -- Mantém os jogadores sentados e move o ônibus sempre para a frente (+Z).
+    local startPivot = data.model:GetPivot()
+    local duration = TRAVEL_DISTANCE / BUS_SPEED
+    local elapsed = 0
+    while elapsed < duration and data.model.Parent do
+        local dt = RunService.Heartbeat:Wait()
+        elapsed += dt
+        local distance = math.min(TRAVEL_DISTANCE, elapsed * BUS_SPEED)
+        data.model:PivotTo(startPivot * CFrame.new(0, 0, distance))
+    end
+
+    local group = {}
+    for _, player in ipairs(data.players) do
+        if player.Parent == Players then table.insert(group, player) end
+    end
+    if #group > 0 then
+        local ok, err = pcall(function()
+            TeleportService:TeleportAsync(DESTINATION_PLACE_ID, group)
+        end)
+        if not ok then
+            warn("Falha ao teleportar o Ônibus " .. i .. ": " .. tostring(err))
+            -- Não finge que teleportou: os jogadores são liberados para tentar novamente.
+            for _, player in ipairs(group) do
+                if player.Character then
+                    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then hrp.CFrame = CFrame.new(0, 5, -75) end
+                end
+            end
+        end
+    end
+    data.players = {}
+    data.timer = 0
+    data.departing = false
+    data.model:PivotTo(busStart[i])
+    updateLabel(i)
+end
+
+-- Temporizadores independentes por ônibus. Ônibus vazio não conta.
+task.spawn(function()
+    while true do
+        task.wait(0.25)
+        for i = 1, BUS_COUNT do
+            local data = buses[i]
+            if not data.departing then
+                -- Limpa jogadores que saíram do servidor ou morreram/foram removidos do ônibus.
+                for n = #data.players, 1, -1 do
+                    local plr = data.players[n]
+                    if plr.Parent ~= Players then
+                        table.remove(data.players, n)
+                    else
+                        local char = plr.Character
+                        local hum = char and char:FindFirstChildOfClass("Humanoid")
+                        local seatedInThisBus = false
+                        if hum and hum.Health > 0 then
+                            for _, seat in ipairs(data.seats) do
+                                if seat.Occupant == hum then
+                                    seatedInThisBus = true
+                                    break
+                                end
+                            end
+                        end
+                        if not seatedInThisBus then
+                            table.remove(data.players, n)
+                        end
+                    end
+                end
+                if #data.players == 0 then
+                    data.timer = 0
+                else
+                    data.timer -= 0.25
+                    if #data.players >= BUS_CAPACITY or data.timer <= 0 then
+                        task.spawn(departBus, i)
+                    end
+                end
+                updateLabel(i)
+            end
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(removePlayerFromBus)
+
+print("Lobby Floresta carregado. Destino PlaceId: " .. DESTINATION_PLACE_ID)
+]]></ProtectedString>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="RBX2">
+    <Properties>
+      <bool name="Archivable">true</bool>
+      <string name="Name">Workspace</string>
+      <Ref name="CurrentCamera">null</Ref>
+      <Ref name="PrimaryPart">null</Ref>
+    </Properties>
+  </Item>
+  <Item class="Lighting" referent="RBX3">
+    <Properties>
+      <bool name="Archivable">true</bool>
+      <string name="Name">Lighting</string>
+    </Properties>
+  </Item>
+</roblox>
